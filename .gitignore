@@ -1,0 +1,86 @@
+# ============================================================
+# CogniitSearch — Root .gitignore
+# ============================================================
+# Each subproject (backend/, frontend/) has its own .gitignore
+# for tooling-specific paths. This file handles cross-cutting
+# concerns plus anything that lives at the repo root.
+# ============================================================
+
+# --- Node.js (in case anything is hoisted to root) ---
+node_modules/
+dist/
+build/
+.npm
+*.tgz
+.pnp
+.pnp.js
+
+# --- TypeScript build artifacts ---
+*.tsbuildinfo
+
+# --- Environment files & Certificates ---
+# Keep .env.example checked in; ignore all real .env files and certificates.
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+.env.test
+.env.*.local
+!.env.example
+*.pem
+
+# --- IDE / Editor ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# --- OS Files ---
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+._*
+
+# --- Docker / Compose local artifacts ---
+docker-volumes/
+.docker/
+
+# --- Logs ---
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Testing / Coverage ---
+coverage/
+.nyc_output/
+*.lcov
+
+# --- Redis (local dev) ---
+dump.rdb
+*.rdb
+
+# --- Caches ---
+.cache/
+.parcel-cache/
+.turbo/
+
+# --- Plans / specs (intentionally not committed) ---
+# Keep docs/superpowers/specs/ committed — only ignore scratch notes.
+*.tmp
+*.bak
+
+# --- Audit / handoff artifacts ---
+# AUDIT.md and CLAUDE.md are ignored. .remember/ is session-local.
+AUDIT.md
+CLAUDE.md
+.remember/
+.agent-trace/

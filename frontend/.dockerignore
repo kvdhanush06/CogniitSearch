@@ -1,0 +1,18 @@
+# Ignore everything that's not needed in the image.
+node_modules
+dist
+coverage
+.env
+.env.local
+.env.*.local
+.git
+.gitignore
+.github
+.vscode
+.idea
+.DS_Store
+*.log
+README.md
+.eslintrc.json
+.prettierrc
+vite-dev.log
