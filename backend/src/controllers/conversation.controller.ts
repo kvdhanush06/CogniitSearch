@@ -49,7 +49,7 @@ export async function listConversations(req: Request, res: Response): Promise<vo
  */
 export async function getConversationDetail(req: Request, res: Response): Promise<void> {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const conversation = await conversationRepository.findById(id);
     if (!conversation) {
       res.status(StatusCodes.NOT_FOUND).json({
@@ -100,7 +100,7 @@ export async function getConversationDetail(req: Request, res: Response): Promis
  */
 export async function deleteConversation(req: Request, res: Response): Promise<void> {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const conversation = await conversationRepository.findById(id);
     if (!conversation) {
       res.status(StatusCodes.NOT_FOUND).json({

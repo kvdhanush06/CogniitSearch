@@ -173,7 +173,7 @@ async function runAsyncPipeline(opts: {
     try {
       const prior = await messageRepository.findByConversationId(convId);
       conversationHistory = prior
-        .filter((m) => m.role !== 'system')
+        .filter((m) => (m.role as string) !== 'system')
         .filter((m) => m.content && m.content.trim().length > 0)
         // The current user message is already at the end of `prior`; the
         // answer worker re-appends the current query via the user prompt

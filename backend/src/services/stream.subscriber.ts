@@ -1,4 +1,4 @@
-import IORedis, { type Redis } from 'ioredis';
+import { Redis } from 'ioredis';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import type { StreamChunk } from './stream.types.js';
@@ -20,7 +20,7 @@ export class StreamSubscriber {
   private onChunk: ((chunk: StreamChunk) => void) | null = null;
 
   constructor() {
-    this.client = new IORedis({
+    this.client = new Redis({
       host: env.REDIS_HOST,
       port: env.REDIS_PORT,
       password: env.REDIS_PASSWORD || undefined,

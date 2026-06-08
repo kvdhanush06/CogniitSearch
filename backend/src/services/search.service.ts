@@ -286,7 +286,6 @@ export class SearchService {
     const { context, sources } = retrievalService.buildContext(
       crawledPages,
       rankedResults,
-      query,
       config.maxContextSources,
     );
 

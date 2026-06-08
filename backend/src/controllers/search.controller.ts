@@ -2,7 +2,7 @@ import { type Request, type Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import { logger } from '../config/logger.js';
 import { searchService } from '../services/search.service.js';
-import type { SearchRequest } from '../validators/index.js';
+import type { SearchRequest } from './validators/index.js';
 
 /**
  * POST /search
@@ -13,10 +13,6 @@ export async function search(req: Request, res: Response): Promise<void> {
     const {
       query,
       maxResults,
-      language,
-      region,
-      safeSearch,
-      freshness,
       enableCrawl,
       enableRanking,
     } = req.body as SearchRequest;
@@ -43,7 +39,7 @@ export async function search(req: Request, res: Response): Promise<void> {
   } catch (error) {
     logger.error({ err: error, query: req.body.query }, 'Search failed');
 
-    const statusCode = 'status' in error ? (error as any).status : StatusCodes.INTERNAL_SERVER_ERROR;
+    const statusCode = error && typeof error === 'object' && 'status' in error ? (error as any).status : StatusCodes.INTERNAL_SERVER_ERROR;
     const message = error instanceof Error ? error.message : 'Search failed';
 
     res.status(statusCode).json({

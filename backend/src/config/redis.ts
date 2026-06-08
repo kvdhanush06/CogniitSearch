@@ -1,9 +1,9 @@
-import IORedis, { type Redis } from 'ioredis';
+import { Redis } from 'ioredis';
 import { env } from './env.js';
 import { logger } from './logger.js';
 
 function createRedisClient(): Redis {
-  const client = new IORedis({
+  const client = new Redis({
     host: env.REDIS_HOST,
     port: env.REDIS_PORT,
     password: env.REDIS_PASSWORD || undefined,

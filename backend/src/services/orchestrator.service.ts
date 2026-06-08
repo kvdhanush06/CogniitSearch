@@ -1,5 +1,5 @@
-import IORedis, { type Redis } from 'ioredis';
-import { Job, QueueEvents } from 'bullmq';
+import { Redis } from 'ioredis';
+import { QueueEvents } from 'bullmq';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { searchQueue, crawlQueue, answerQueue } from '../queues/index.js';
@@ -30,7 +30,6 @@ const STAGE_LABELS: Record<PipelineStage, string> = {
   citation: 'Attaching citations…',
 };
 
-const STREAM_CHANNEL_PREFIX = 'cogniit:stream:';
 
 // Max characters per source when building the answer-job context.
 // 5 sources × 3000 chars = 15K chars (~4K tokens) for context alone,
@@ -73,7 +72,7 @@ export class Orchestrator {
     private readonly write: (chunk: StreamChunk) => void,
     private readonly onComplete: (result: OrchestratorResult) => Promise<void> | void,
   ) {
-    this.jobClient = new IORedis({
+    this.jobClient = new Redis({
       host: env.REDIS_HOST,
       port: env.REDIS_PORT,
       password: env.REDIS_PASSWORD || undefined,
@@ -188,7 +187,6 @@ export class Orchestrator {
       }
       const crawledByUrl = new Map<string, CrawledPage>();
       for (const page of crawlResult.pages) {
-        const ranked = rankedByUrl.get(page.url);
         crawledByUrl.set(page.url, {
           url: page.url,
           title: page.title,

@@ -1,4 +1,4 @@
-import type { Request, Response, NextFunction, RequestHandler } from 'express';
+import type { Request, RequestHandler } from 'express';
 import { env } from '../config/env.js';
 import { redis } from '../config/redis.js';
 import { logger } from '../config/logger.js';

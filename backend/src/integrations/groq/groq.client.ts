@@ -80,9 +80,9 @@ export function handleGroqError(error: unknown): never {
     const axiosErr = error as AxiosError<GroqApiError>;
     const status = axiosErr.response?.status ?? 0;
     const data = axiosErr.response?.data;
-    const message = data?.message ?? axiosErr.message;
-    const code = data?.code ?? axiosErr.code ?? 'UNKNOWN_ERROR';
-    const type = data?.type ?? 'api_error';
+    const message = data?.error?.message ?? axiosErr.message;
+    const code = data?.error?.code ?? axiosErr.code ?? 'UNKNOWN_ERROR';
+    const type = data?.error?.type ?? 'api_error';
 
     logger.error({ code, status, type, message }, 'Groq API request failed');
     throw new GroqClientError(message, code, status, type);

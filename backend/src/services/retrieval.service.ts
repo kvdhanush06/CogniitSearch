@@ -3,7 +3,6 @@ import { tinyfishCrawlClient } from '../integrations/tinyfish/crawl.client.js';
 import { TinyfishCrawlError } from '../integrations/tinyfish/crawl.client.js';
 import { cacheService } from './cache.service.js';
 import type { RankedResult, CrawledPage } from './search.types.js';
-import type { TinyfishCrawlResponse } from '../integrations/tinyfish/crawl.types.js';
 
 export class RetrievalService {
   /**
@@ -54,7 +53,6 @@ export class RetrievalService {
   buildContext(
     crawledPages: Map<string, CrawledPage>,
     rankedResults: RankedResult[],
-    query: string,
     maxSources: number,
   ): {
     context: string;

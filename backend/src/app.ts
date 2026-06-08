@@ -2,7 +2,7 @@ import express, { type Express, type Request, type Response, type NextFunction }
 import helmet from 'helmet';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
-import pinoHttp from 'pino-http';
+import { pinoHttp } from 'pino-http';
 
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
@@ -38,7 +38,7 @@ app.use(
   pinoHttp({
     logger,
     autoLogging: {
-      ignore: (req) => req.url === '/health',
+      ignore: (req: any) => req.url === '/health',
     },
   })
 );

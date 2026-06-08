@@ -120,7 +120,7 @@ export async function getUserFromToken(token: string): Promise<SessionUser> {
  * Invalidate a Supabase session server-side. Used on logout.
  */
 export async function signOut(token: string): Promise<void> {
-  const { error } = await supabaseAdmin.auth.signOut(token);
+  const { error } = await supabaseAdmin.auth.admin.signOut(token);
   if (error) {
     logger.warn({ err: error.message }, 'Supabase signOut returned an error');
     // Non-fatal — the cookie has already been cleared by the controller.

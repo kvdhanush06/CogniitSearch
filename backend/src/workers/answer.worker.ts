@@ -1,7 +1,7 @@
 import { Worker, type Job } from 'bullmq';
 import { defaultWorkerOptions } from '../config/bullmq.js';
 import { logger } from '../config/logger.js';
-import IORedis, { type Redis } from 'ioredis';
+import { Redis } from 'ioredis';
 import { env } from '../config/env.js';
 import { groqChatClient } from '../integrations/groq/groq.chat.js';
 import { citationService } from '../services/citation.service.js';
@@ -17,20 +17,23 @@ function streamChannel(jobId: string): string {
 
 let publisher: Redis | null = null;
 function getPublisher(): Redis {
-  if (!publisher) {
-    publisher = new IORedis({
-      host: env.REDIS_HOST,
-      port: env.REDIS_PORT,
-      password: env.REDIS_PASSWORD || undefined,
-      db: env.REDIS_DB,
-      maxRetriesPerRequest: 3,
-      enableReadyCheck: true,
-    });
-    publisher.on('error', (err: Error) =>
-      logger.error({ err: err.message }, 'Answer worker stream publisher error'),
-    );
-  }
-  return publisher;
+  if (publisher) return publisher;
+
+  const client = new Redis({
+    host: env.REDIS_HOST,
+    port: env.REDIS_PORT,
+    password: env.REDIS_PASSWORD || undefined,
+    db: env.REDIS_DB,
+    maxRetriesPerRequest: 3,
+    enableReadyCheck: true,
+  });
+
+  client.on('error', (err: Error) =>
+    logger.error({ err: err.message }, 'Answer worker stream publisher error'),
+  );
+
+  publisher = client;
+  return client;
 }
 
 async function emit(jobId: string, chunk: StreamChunk): Promise<void> {

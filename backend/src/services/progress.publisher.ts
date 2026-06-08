@@ -1,4 +1,4 @@
-import IORedis, { type Redis } from 'ioredis';
+import { Redis } from 'ioredis';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import {
@@ -27,7 +27,7 @@ function channelFor(jobId: string): string {
 // connection; pub/sub needs a separate client because subscribed clients
 // can only run subscribe/unsubscribe/psubscribe.
 function createPubClient(): Redis {
-  return new IORedis({
+  return new Redis({
     host: env.REDIS_HOST,
     port: env.REDIS_PORT,
     password: env.REDIS_PASSWORD || undefined,
