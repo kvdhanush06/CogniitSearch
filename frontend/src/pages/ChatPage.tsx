@@ -204,13 +204,15 @@ export function ChatPage({
   const visibleMessages: Message[] =
     seededMessages.length > 0
       ? seededMessages
-      : storeMessages.map((m) => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          sources: (m.metadata?.sources as SourceAttribution[] | undefined) ?? undefined,
-          timestamp: new Date(m.timestamp),
-        }));
+      : storeMessages
+          .filter((m) => m.role !== 'system')
+          .map((m) => ({
+            id: m.id,
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+            sources: (m.metadata?.sources as SourceAttribution[] | undefined) ?? undefined,
+            timestamp: new Date(m.timestamp),
+          }));
 
   return (
     <div className="flex h-screen bg-background">
@@ -309,11 +311,13 @@ export function ChatPage({
 
 function toLocalMessages(initial: ConversationMessage[] | undefined): Message[] {
   if (!initial) return [];
-  return initial.map((m) => ({
-    id: m.id,
-    role: m.role,
-    content: m.content,
-    sources: (m.sources ?? undefined) as SourceAttribution[] | undefined,
-    timestamp: new Date(m.createdAt),
-  }));
+  return initial
+    .filter((m) => m.role !== 'system')
+    .map((m) => ({
+      id: m.id,
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+      sources: (m.sources ?? undefined) as SourceAttribution[] | undefined,
+      timestamp: new Date(m.createdAt),
+    }));
 }

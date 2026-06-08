@@ -1,5 +1,4 @@
 import { apiClient } from './client.js';
-import type { SearchContext } from './types.js';
 
 // Chat-related types
 export interface ChatRequest {

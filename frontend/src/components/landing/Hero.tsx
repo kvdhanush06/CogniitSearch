@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { SearchIcon, SparklesIcon, ArrowRightIcon, MessageSquareIcon } from '@/components/icons';
+import { SearchIcon, ArrowRightIcon, MessageSquareIcon } from '@/components/icons';
 
 const SUGGESTIONS = [
   'What were the biggest AI breakthroughs of 2025?',

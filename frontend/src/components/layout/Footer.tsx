@@ -1,4 +1,4 @@
-import { GithubIcon, LogoMark } from '@/components/icons';
+import { LogoMark } from '@/components/icons';
 
 export function Footer() {
   return (
