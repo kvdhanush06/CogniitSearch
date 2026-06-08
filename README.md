@@ -121,7 +121,7 @@ This project deploys to a single Linode instance via two independent Docker imag
 
 ```bash
 # On the Linode box
-git clone <repo> /opt/cogniit && cd /opt/cogniit
+git clone https://github.com/kvdhanush06/CogniitSearch.git /opt/cogniit && cd /opt/cogniit
 cp backend/.env.example backend/.env  &&  $EDITOR backend/.env
 cp frontend/.env.example frontend/.env &&  $EDITOR frontend/.env
 
