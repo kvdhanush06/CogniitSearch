@@ -178,3 +178,9 @@ The application is deployed using:
 * Host-level Nginx reverse proxy
 * TLS via Let's Encrypt
 * Single Linode deployment
+
+---
+
+## Built by
+
+**Venkata Dhanush Kakarlamudi** — [Portfolio](https://portfolio.allkvd.dev/)
