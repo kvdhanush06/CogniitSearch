@@ -1,89 +1,61 @@
 import { type Request, type Response, type NextFunction } from 'express';
-import type { ZodSchema } from 'zod';
+import { ZodError, type ZodType } from 'zod';
 
-/**
- * Create validation middleware for request body
- */
-export function validateBody(schema: ZodSchema) {
-  return (req: Request, res: Response, next: NextFunction) => {
+function sendValidationError(res: Response, message: string, error: ZodError): void {
+  res.status(400).json({
+    success: false,
+    error: {
+      message,
+      code: 'VALIDATION_ERROR',
+      details: error.issues.map((issue) => ({
+        field: issue.path.join('.') || 'request',
+        message: issue.message,
+      })),
+    },
+  });
+}
+
+export function validateBody<T>(schema: ZodType<T>) {
+  return (req: Request, res: Response, next: NextFunction): void => {
     try {
-      const validated = schema.parse(req.body);
-      req.body = validated;
+      req.body = schema.parse(req.body);
       next();
-    } catch (error: any) {
-      if (error.errors) {
-        res.status(400).json({
-          success: false,
-          error: {
-            message: 'Validation failed',
-            code: 'VALIDATION_ERROR',
-            details: error.errors.map((e: any) => ({
-              field: e.path.join('.'),
-              message: e.message,
-            })),
-          },
-        });
-      } else {
-        next(error);
+    } catch (error) {
+      if (error instanceof ZodError) {
+        sendValidationError(res, 'Validation failed', error);
+        return;
       }
+      next(error);
     }
   };
 }
 
-/**
- * Create validation middleware for request params
- */
-export function validateParams(schema: ZodSchema) {
-  return (req: Request, res: Response, next: NextFunction) => {
+export function validateParams<T>(schema: ZodType<T>) {
+  return (req: Request, res: Response, next: NextFunction): void => {
     try {
-      const validated = schema.parse(req.params);
-      req.params = validated;
+      req.params = schema.parse(req.params) as typeof req.params;
       next();
-    } catch (error: any) {
-      if (error.errors) {
-        res.status(400).json({
-          success: false,
-          error: {
-            message: 'Invalid parameters',
-            code: 'VALIDATION_ERROR',
-            details: error.errors.map((e: any) => ({
-              field: e.path.join('.'),
-              message: e.message,
-            })),
-          },
-        });
-      } else {
-        next(error);
+    } catch (error) {
+      if (error instanceof ZodError) {
+        sendValidationError(res, 'Invalid parameters', error);
+        return;
       }
+      next(error);
     }
   };
 }
 
-/**
- * Create validation middleware for query string
- */
-export function validateQuery(schema: ZodSchema) {
-  return (req: Request, res: Response, next: NextFunction) => {
+export function validateQuery<T>(schema: ZodType<T>) {
+  return (req: Request, res: Response, next: NextFunction): void => {
     try {
-      const validated = schema.parse(req.query);
-      req.query = validated;
+      req.query = schema.parse(req.query) as typeof req.query;
       next();
-    } catch (error: any) {
-      if (error.errors) {
-        res.status(400).json({
-          success: false,
-          error: {
-            message: 'Invalid query parameters',
-            code: 'VALIDATION_ERROR',
-            details: error.errors.map((e: any) => ({
-              field: e.path.join('.'),
-              message: e.message,
-            })),
-          },
-        });
-      } else {
-        next(error);
+    } catch (error) {
+      if (error instanceof ZodError) {
+        sendValidationError(res, 'Invalid query parameters', error);
+        return;
       }
+      next(error);
     }
   };
 }
