@@ -27,14 +27,28 @@ export class ConversationRepository {
       .from(TABLES.CONVERSATIONS)
       .select('*')
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
     if (error) {
-      if (error.code === 'PGRST116') return null;
       throw new Error(`ConversationRepository.findById failed: ${error.message}`);
     }
 
-    return data as Conversation;
+    return data as Conversation | null;
+  }
+
+  async findByIdForUser(id: string, userId: string): Promise<Conversation | null> {
+    const { data, error } = await supabaseAdmin
+      .from(TABLES.CONVERSATIONS)
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`ConversationRepository.findByIdForUser failed: ${error.message}`);
+    }
+
+    return data as Conversation | null;
   }
 
   async findByUserId(
@@ -77,14 +91,13 @@ export class ConversationRepository {
       .update(data)
       .eq('id', id)
       .select('*')
-      .single();
+      .maybeSingle();
 
     if (error) {
-      if (error.code === 'PGRST116') return null;
       throw new Error(`ConversationRepository.update failed: ${error.message}`);
     }
 
-    return updated as Conversation;
+    return updated as Conversation | null;
   }
 
   async delete(id: string): Promise<boolean> {
@@ -95,6 +108,20 @@ export class ConversationRepository {
 
     if (error) {
       throw new Error(`ConversationRepository.delete failed: ${error.message}`);
+    }
+
+    return (count ?? 0) > 0;
+  }
+
+  async deleteForUser(id: string, userId: string): Promise<boolean> {
+    const { error, count } = await supabaseAdmin
+      .from(TABLES.CONVERSATIONS)
+      .delete({ count: 'exact' })
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    if (error) {
+      throw new Error(`ConversationRepository.deleteForUser failed: ${error.message}`);
     }
 
     return (count ?? 0) > 0;
