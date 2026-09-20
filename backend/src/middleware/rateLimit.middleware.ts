@@ -1,24 +1,8 @@
 import type { Request, RequestHandler } from 'express';
+
 import { env } from '../config/env.js';
 import { redis } from '../config/redis.js';
 import { logger } from '../config/logger.js';
-
-/**
- * Token-bucket rate limiter backed by Redis.
- *
- * For an authenticated user, the bucket key is `cogniit:rl:user:<id>`.
- * For an anonymous caller, it's `cogniit:rl:ip:<ip>`. Each request
- * consumes one token; tokens refill smoothly (a "leaky bucket" with a
- * continuous refill) so a user who hasn't asked in an hour can fire
- * multiple queries in a row, then is throttled to a steady rate.
- *
- * Configured via env:
- *   RATE_LIMIT_BUCKET_CAPACITY (default 100) — burst size
- *   RATE_LIMIT_REFILL_PER_HOUR (default 100)  — sustained rate
- *
- * On Redis failure the request is allowed (fail open); a 500 is worse
- * than a temporarily unbounded user.
- */
 
 const KEY_PREFIX = 'cogniit:rl:';
 
@@ -29,12 +13,9 @@ interface BucketState {
 
 function identityFor(req: Request): string {
   if (req.user?.id) return `user:${req.user.id}`;
-  const fwd = req.headers['x-forwarded-for'];
-  const ip =
-    (Array.isArray(fwd) ? fwd[0] : typeof fwd === 'string' ? fwd.split(',')[0]?.trim() : null) ??
-    req.socket.remoteAddress ??
-    'unknown';
-  return `ip:${ip}`;
+  // Express derives req.ip from the configured trust-proxy policy. Do not
+  // trust a raw X-Forwarded-For header in application code.
+  return `ip:${req.ip || req.socket.remoteAddress || 'unknown'}`;
 }
 
 function refill(state: BucketState, capacity: number, refillPerHour: number, nowMs: number): BucketState {
@@ -88,15 +69,20 @@ export const rateLimit: RequestHandler = (req, res, next) => {
         });
         return;
       }
+
       const after: BucketState = { tokens: before.tokens - 1, lastRefillMs: now };
-      // Persist with a 2h safety TTL so abandoned keys eventually clear.
       await redis.set(key, JSON.stringify(after), 'EX', 2 * 60 * 60);
       res.setHeader('X-RateLimit-Remaining', String(Math.floor(after.tokens)));
       next();
     } catch (err) {
-      // Fail open — don't block users on a Redis blip.
-      logger.warn({ err }, 'Rate limit check failed; allowing request');
-      next();
+      // Redis protects an expensive external-API operation. Failing open
+      // during an outage can turn a Redis incident into an unbounded cost
+      // incident, so reject the request instead.
+      logger.error({ err }, 'Rate limit check failed; rejecting request');
+      res.status(503).json({
+        success: false,
+        error: { message: 'Service temporarily unavailable', code: 'RATE_LIMIT_UNAVAILABLE' },
+      });
     }
   })();
 };
