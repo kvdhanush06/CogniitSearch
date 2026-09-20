@@ -9,90 +9,59 @@ import { logger } from './config/logger.js';
 import routes from './routes/index.js';
 import { loadSession } from './middleware/auth.middleware.js';
 
-// --- Create Express application ---
 const app: Express = express();
 
-// --- Security headers ---
+app.set('trust proxy', env.TRUST_PROXY);
 app.use(helmet());
-
-// --- CORS configuration ---
 app.use(
   cors({
     origin: env.CORS_ORIGIN,
     credentials: env.CORS_CREDENTIALS,
-  })
+  }),
 );
-
-// --- Cookie parser (httpOnly session cookie) ---
 app.use(cookieParser());
-
-// --- Body parsers ---
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// --- Session loader (attaches req.user if a valid cookie is present) ---
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(loadSession);
 
-// --- Request logging ---
 app.use(
   pinoHttp({
     logger,
     autoLogging: {
-      ignore: (req: any) => req.url === '/health',
+      ignore: (req: Request) => req.url === '/health',
     },
-  })
+  }),
 );
 
-// --- API routes ---
 app.use(env.API_PREFIX, routes);
 
-// --- 404 handler for unmatched routes ---
 app.use((_req: Request, res: Response): void => {
   res.status(404).json({
     success: false,
-    error: {
-      message: 'Resource not found',
-      code: 'NOT_FOUND',
-    },
+    error: { message: 'Resource not found', code: 'NOT_FOUND' },
   });
 });
 
-// --- Global error handler ---
-interface ErrorResponse {
-  success: false;
-  error: {
-    message: string;
-    code: string;
-    stack?: string;
-  };
-}
-
 app.use((err: Error, req: Request, res: Response, _next: NextFunction): void => {
-  const statusCode = 'statusCode' in err ? (err as Error & { statusCode: number }).statusCode : 500;
-  const code = 'code' in err ? (err as Error & { code: string }).code : 'INTERNAL_SERVER_ERROR';
+  const rawStatus =
+    'statusCode' in err && typeof (err as { statusCode?: unknown }).statusCode === 'number'
+      ? (err as { statusCode: number }).statusCode
+      : 500;
+  const statusCode = rawStatus >= 400 && rawStatus < 500 ? rawStatus : 500;
+  const code =
+    'code' in err && typeof (err as { code?: unknown }).code === 'string'
+      ? (err as { code: string }).code
+      : 'INTERNAL_SERVER_ERROR';
 
-  logger.error(
-    {
-      err,
-      method: req.method,
-      url: req.url,
-      statusCode,
-    },
-    'Unhandled error'
-  );
+  logger.error({ err, method: req.method, url: req.url, statusCode }, 'Unhandled error');
 
-  const response: ErrorResponse = {
+  res.status(statusCode).json({
     success: false,
     error: {
-      message: env.NODE_ENV === 'production' && statusCode === 500
-        ? 'Internal server error'
-        : err.message,
-      code,
-      ...(env.NODE_ENV === 'development' && { stack: err.stack }),
+      message: statusCode === 500 ? 'Internal server error' : 'Request could not be processed',
+      code: statusCode === 500 ? 'INTERNAL_SERVER_ERROR' : code,
     },
-  };
-
-  res.status(statusCode).json(response);
+  });
 });
 
 export default app;
