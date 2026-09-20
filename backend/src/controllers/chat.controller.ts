@@ -1,5 +1,6 @@
-import type { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
+import type { Request, Response } from 'express';
+
 import { logger } from '../config/logger.js';
 import { env } from '../config/env.js';
 import { searchService } from '../services/search.service.js';
@@ -10,15 +11,6 @@ import { titleService } from '../services/title.service.js';
 import { conversationRepository, messageRepository, userRepository } from '../repositories/index.js';
 import type { ChatRequest } from '../controllers/validators/index.js';
 
-/**
- * POST /chat
- *
- * Two paths, both producing the same SSE protocol:
- *   USE_BULLMQ=false → synchronous inline pipeline (legacy / fallback).
- *   USE_BULLMQ=true  → Orchestrator service fans out to search → crawl
- *                      → answer workers; progress + answer chunks are
- *                      forwarded to the SSE response.
- */
 export async function chat(req: Request, res: Response): Promise<void> {
   try {
     const {
@@ -30,13 +22,32 @@ export async function chat(req: Request, res: Response): Promise<void> {
       stream,
       messages,
     } = req.body as ChatRequest;
-    const userId = req.user?.id ?? (req.headers['x-user-id'] as string) ?? 'anonymous';
+    // Never accept a client-controlled identity header for authorization,
+    // persistence, rate limiting, or ownership decisions.
+    const userId = req.user?.id ?? 'anonymous';
 
     logger.info({ query, userId, stream, useBullMQ: env.USE_BULLMQ }, 'Chat request received');
 
+    if (conversationId && userId === 'anonymous') {
+      res.status(StatusCodes.UNAUTHORIZED).json({
+        success: false,
+        error: { message: 'Authentication required for existing conversations', code: 'UNAUTHENTICATED' },
+      });
+      return;
+    }
+
+    if (conversationId && userId !== 'anonymous') {
+      const ownedConversation = await conversationRepository.findByIdForUser(conversationId, userId);
+      if (!ownedConversation) {
+        res.status(StatusCodes.NOT_FOUND).json({
+          success: false,
+          error: { message: 'Conversation not found', code: 'CONVERSATION_NOT_FOUND' },
+        });
+        return;
+      }
+    }
+
     if (stream === false) {
-      // Non-streaming JSON path. Always runs synchronously regardless of
-      // USE_BULLMQ. The result shape matches the legacy contract.
       const searchResult = await searchService.executePipeline(query, userId);
       const answer = await answerService.generateAnswer(
         query,
@@ -64,11 +75,10 @@ export async function chat(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // Streaming path. Set SSE headers.
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering
+    res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
 
     const write = (payload: unknown): void => {
@@ -100,22 +110,18 @@ export async function chat(req: Request, res: Response): Promise<void> {
       });
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Chat failed';
-    logger.error({ err: message }, 'Chat request failed');
+    logger.error({ err: error instanceof Error ? error.message : String(error) }, 'Chat request failed');
     if (res.headersSent) {
-      res.write(`data: ${JSON.stringify({ type: 'error', error: message })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'error', error: 'Chat failed' })}\n\n`);
       res.end();
       return;
     }
     res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
       success: false,
-      error: { message, code: 'CHAT_ERROR' },
+      error: { message: 'Chat failed', code: 'CHAT_ERROR' },
     });
   }
 }
-
-// ---------------------------------------------------------------------------
-// Async path: orchestrator drives the BullMQ pipeline.
 
 async function runAsyncPipeline(opts: {
   res: Response;
@@ -129,45 +135,31 @@ async function runAsyncPipeline(opts: {
 }): Promise<void> {
   const { res, write, userId, query, conversationId, model, temperature, maxTokens } = opts;
 
-  // Persist the user message immediately so the conversation is durable
-  // even if the user disconnects mid-pipeline.
   let convId = conversationId;
   try {
     convId = await ensureConversation({ existingId: conversationId, userId, query });
   } catch (err) {
-    logger.warn({ err }, 'Failed to ensure conversation; continuing anonymously');
-    convId = conversationId;
+    logger.warn({ err }, 'Failed to ensure conversation');
+    convId = undefined;
   }
+
   if (convId) {
-    // Emit the conversation id (and the freshly-persisted user message
-    // id) as the very first SSE chunk. The SPA uses the conversation
-    // id to thread follow-ups, and the message id to scope the
-    // reattach endpoint + the frontend's chat session store entry.
     let userMessageId: string | undefined;
     try {
-      const created = await messageRepository.create({
+      const created = await messageRepository.createForUser(userId, {
         conversation_id: convId,
         role: 'user',
         content: query,
       });
       userMessageId = created.id;
     } catch (err) {
-      logger.warn({ err }, 'Failed to persist user message; continuing');
+      logger.warn({ err }, 'Failed to persist user message');
     }
     write({ type: 'conversation', conversationId: convId, messageId: userMessageId });
-    // Stash the id on the closure so the orchestrator.run call below
-    // (which lives further down) can read it. We attach it as a
-    // side-channel rather than threading a new param to keep the
-    // orchestrator's run() signature stable.
     (opts as { _userMessageId?: string })._userMessageId = userMessageId;
   }
 
-  // Fetch prior messages so the LLM has memory of what was already
-  // discussed in this conversation. Limit to the most recent N pairs
-  // to keep the prompt under Groq's request size limit. The message
-  // we just persisted is included so the LLM sees the current query
-  // in chronological order with prior context.
-  const HISTORY_LIMIT = 12; // ~6 user/assistant pairs
+  const HISTORY_LIMIT = 12;
   let conversationHistory: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
   if (convId) {
     try {
@@ -175,15 +167,10 @@ async function runAsyncPipeline(opts: {
       conversationHistory = prior
         .filter((m) => (m.role as string) !== 'system')
         .filter((m) => m.content && m.content.trim().length > 0)
-        // The current user message is already at the end of `prior`; the
-        // answer worker re-appends the current query via the user prompt
-        // builder, so drop the last entry to avoid duplication.
         .slice(0, -1)
         .slice(-HISTORY_LIMIT)
         .map((m) => ({
           role: m.role as 'user' | 'assistant',
-          // Cap each historical turn to 1500 chars so a long prior
-          // answer doesn't blow up the prompt size for follow-ups.
           content: m.content.length > 1500 ? `${m.content.slice(0, 1500)}…` : m.content,
         }));
     } catch (err) {
@@ -191,15 +178,9 @@ async function runAsyncPipeline(opts: {
     }
   }
 
-  // Accumulate streamed answer text so we can persist the full body in
-  // `onComplete` (so loading the conversation later replays correctly).
   let streamedAnswer = '';
   const writeAndCapture = (payload: unknown): void => {
-    if (
-      payload &&
-      typeof payload === 'object' &&
-      (payload as { type?: string }).type === 'content'
-    ) {
+    if (payload && typeof payload === 'object' && (payload as { type?: string }).type === 'content') {
       const content = (payload as { content?: string }).content;
       if (typeof content === 'string') streamedAnswer += content;
     }
@@ -207,19 +188,13 @@ async function runAsyncPipeline(opts: {
   };
 
   const orchestrator = new Orchestrator(writeAndCapture, async (result) => {
-    if (!convId) return;
-    if (!result.ok) return;
-    // Persist the assistant's final message + sources.
+    if (!convId || !result.ok) return;
     try {
-      await messageRepository.create({
+      await messageRepository.createForUser(userId, {
         conversation_id: convId,
         role: 'assistant',
         content: streamedAnswer,
-        sources: (result.sources ?? []).map((s) => ({
-          url: s.url,
-          title: s.title,
-          snippet: '',
-        })),
+        sources: (result.sources ?? []).map((s) => ({ url: s.url, title: s.title, snippet: '' })),
         model: env.GROQ_MODEL,
       });
     } catch (err) {
@@ -227,13 +202,12 @@ async function runAsyncPipeline(opts: {
     }
   });
 
-  // Cancel the orchestrator if the client disconnects.
   let cancelled = false;
   res.on('close', () => {
     if (!cancelled) {
       cancelled = true;
       orchestrator.cancel();
-      logger.info({ userId, query }, 'Client disconnected; cancelling orchestrator');
+      logger.info({ userId }, 'Client disconnected; cancelling orchestrator');
     }
   });
 
@@ -247,14 +221,10 @@ async function runAsyncPipeline(opts: {
     maxTokens,
     messages: conversationHistory,
   }).catch((err) => {
-    const stack = err instanceof Error ? err.stack : undefined;
-    logger.error({ err: err instanceof Error ? err.message : String(err), stack }, 'Orchestrator.run threw at chat controller boundary');
+    logger.error({ err: err instanceof Error ? err.message : String(err) }, 'Orchestrator.run failed');
   });
   res.end();
 }
-
-// ---------------------------------------------------------------------------
-// Sync path: legacy / fallback. Runs the pipeline inline.
 
 async function runSyncPipeline(opts: {
   res: Response;
@@ -274,70 +244,52 @@ async function runSyncPipeline(opts: {
     convId = await ensureConversation({ existingId: conversationId, userId, query });
   } catch (err) {
     logger.warn({ err }, 'ensureConversation failed in sync path');
+    convId = undefined;
   }
 
   try {
     write({ type: 'progress', stage: 'search', message: 'Searching the web…', ratio: 0 });
     const pipeline = await searchService.executePipeline(query, userId);
-    write({
-      type: 'progress',
-      stage: 'rank',
-      message: `Found ${pipeline.rankedResults.length} sources`,
-      count: pipeline.rankedResults.length,
-      ratio: 0.2,
-    });
+    write({ type: 'progress', stage: 'rank', message: `Found ${pipeline.rankedResults.length} sources`, count: pipeline.rankedResults.length, ratio: 0.2 });
     write({ type: 'progress', stage: 'context', message: 'Composing context…', ratio: 0.4 });
 
     let fullAnswer = '';
     write({ type: 'progress', stage: 'answer', message: 'Generating answer…', ratio: 0.6 });
-    for await (const chunk of answerService.generateAnswerStream(
-      query,
-      pipeline.context,
-      {
-        model,
-        temperature,
-        maxTokens,
-        enableStreaming: true,
-        enableCitationValidation: true,
-      },
-      messages,
-    )) {
+    for await (const chunk of answerService.generateAnswerStream(query, pipeline.context, {
+      model,
+      temperature,
+      maxTokens,
+      enableStreaming: true,
+      enableCitationValidation: true,
+    }, messages)) {
       if (chunk.type === 'content' && chunk.content) {
         fullAnswer += chunk.content;
         write({ type: 'content', content: chunk.content });
       } else if (chunk.type === 'done' && chunk.content) {
         write({ type: 'done', content: chunk.content });
       } else if (chunk.type === 'error') {
-        write({ type: 'error', error: chunk.error ?? 'Answer failed' });
+        write({ type: 'error', error: 'Answer failed' });
         res.end();
         return;
       }
     }
     write({ type: 'progress', stage: 'citation', message: 'Citations ready', ratio: 0.85 });
 
-    // Follow-up generation (cheap small model).
     try {
       const fu = await followUpsService.generate(query, fullAnswer, pipeline.context);
-      if (fu.questions.length > 0) {
-        write({ type: 'follow_ups', questions: fu.questions });
-      }
+      if (fu.questions.length > 0) write({ type: 'follow_ups', questions: fu.questions });
     } catch (err) {
       logger.warn({ err }, 'Follow-up generation failed in sync path');
     }
 
-    // Persist both messages.
     if (convId) {
       try {
-        await messageRepository.create({ conversation_id: convId, role: 'user', content: query });
-        await messageRepository.create({
+        await messageRepository.createForUser(userId, { conversation_id: convId, role: 'user', content: query });
+        await messageRepository.createForUser(userId, {
           conversation_id: convId,
           role: 'assistant',
           content: fullAnswer,
-          sources: pipeline.context.sources.map((s) => ({
-            url: s.url,
-            title: s.title,
-            snippet: '',
-          })),
+          sources: pipeline.context.sources.map((s) => ({ url: s.url, title: s.title, snippet: '' })),
           model: env.GROQ_MODEL,
         });
       } catch (err) {
@@ -348,36 +300,30 @@ async function runSyncPipeline(opts: {
     res.end();
   } catch (err) {
     logger.error({ err }, 'Sync streaming failed');
-    write({ type: 'error', error: err instanceof Error ? err.message : 'Stream failed' });
+    write({ type: 'error', error: 'Stream failed' });
     res.end();
   }
 }
 
-// ---------------------------------------------------------------------------
-// Shared helpers.
-
-async function ensureConversation(opts: {
-  existingId?: string;
-  userId: string;
-  query: string;
-}): Promise<string> {
-  if (opts.existingId) return opts.existingId;
-  if (opts.userId !== 'anonymous') {
-    try {
-      const existing = await userRepository.findById(opts.userId);
-      if (!existing) {
-        await userRepository.create({
-          id: opts.userId,
-          email: `${opts.userId}@unknown.local`,
-        });
-      }
-    } catch {
-      // Supabase schema may not be migrated yet
-    }
+async function ensureConversation(opts: { existingId?: string; userId: string; query: string }): Promise<string | undefined> {
+  if (opts.existingId) {
+    if (opts.userId === 'anonymous') return undefined;
+    const existing = await conversationRepository.findByIdForUser(opts.existingId, opts.userId);
+    return existing?.id;
   }
-  // Generate a short title (3-5 words) via a cheap LLM call. Falls
-  // back to a truncated query if the call fails — so we never block
-  // conversation creation on the title.
+
+  if (opts.userId === 'anonymous') return undefined;
+
+  try {
+    const existingUser = await userRepository.findById(opts.userId);
+    if (!existingUser) {
+      await userRepository.create({ id: opts.userId, email: `${opts.userId}@unknown.local` });
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Failed to ensure user record');
+    return undefined;
+  }
+
   const title = await titleService.generate(opts.query);
   const conv = await conversationRepository.create({
     user_id: opts.userId,
