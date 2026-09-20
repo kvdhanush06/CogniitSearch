@@ -1,21 +1,14 @@
 import type { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import { logger } from '../config/logger.js';
-import {
-  conversationRepository,
-  messageRepository,
-} from '../repositories/index.js';
+import { conversationRepository, messageRepository } from '../repositories/index.js';
 import type { CreateMessageData } from '../repositories/message.repository.js';
+import type { PaginationQuery } from './validators/index.js';
 
-/**
- * GET /conversations
- * List the authenticated user's conversations (most recent first).
- */
 export async function listConversations(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.user!.id;
-    const limit = Math.min(parseInt((req.query.limit as string) ?? '20', 10) || 20, 100);
-    const offset = Math.max(parseInt((req.query.offset as string) ?? '0', 10) || 0, 0);
+    const { limit, offset } = req.query as unknown as PaginationQuery;
 
     const [conversations, total] = await Promise.all([
       conversationRepository.findByUserId(userId, { limit, offset }),
@@ -43,14 +36,11 @@ export async function listConversations(req: Request, res: Response): Promise<vo
   }
 }
 
-/**
- * GET /conversations/:id
- * Fetch a single conversation with its messages.
- */
 export async function getConversationDetail(req: Request, res: Response): Promise<void> {
   try {
+    const userId = req.user!.id;
     const id = req.params.id as string;
-    const conversation = await conversationRepository.findById(id);
+    const conversation = await conversationRepository.findByIdForUser(id, userId);
     if (!conversation) {
       res.status(StatusCodes.NOT_FOUND).json({
         success: false,
@@ -58,13 +48,7 @@ export async function getConversationDetail(req: Request, res: Response): Promis
       });
       return;
     }
-    if (req.user && conversation.user_id !== req.user.id) {
-      res.status(StatusCodes.FORBIDDEN).json({
-        success: false,
-        error: { message: 'Not your conversation', code: 'FORBIDDEN' },
-      });
-      return;
-    }
+
     const messages = await messageRepository.findByConversationId(id);
     res.status(StatusCodes.OK).json({
       success: true,
@@ -94,30 +78,19 @@ export async function getConversationDetail(req: Request, res: Response): Promis
   }
 }
 
-/**
- * DELETE /conversations/:id
- * Delete a conversation and its messages.
- */
 export async function deleteConversation(req: Request, res: Response): Promise<void> {
   try {
+    const userId = req.user!.id;
     const id = req.params.id as string;
-    const conversation = await conversationRepository.findById(id);
-    if (!conversation) {
+    const deleted = await conversationRepository.deleteForUser(id, userId);
+    if (!deleted) {
       res.status(StatusCodes.NOT_FOUND).json({
         success: false,
         error: { message: 'Conversation not found', code: 'CONVERSATION_NOT_FOUND' },
       });
       return;
     }
-    if (req.user && conversation.user_id !== req.user.id) {
-      res.status(StatusCodes.FORBIDDEN).json({
-        success: false,
-        error: { message: 'Not your conversation', code: 'FORBIDDEN' },
-      });
-      return;
-    }
-    await messageRepository.deleteByConversationId(id);
-    await conversationRepository.delete(id);
+
     res.status(StatusCodes.OK).json({ success: true, data: { ok: true } });
   } catch (err) {
     logger.error({ err, id: req.params.id }, 'deleteConversation failed');
@@ -128,17 +101,13 @@ export async function deleteConversation(req: Request, res: Response): Promise<v
   }
 }
 
-/**
- * Persist a single message to the messages table. Used by the chat
- * controller after the answer stream completes. The caller is
- * responsible for ensuring the conversation exists.
- */
 export async function persistMessage(
+  userId: string,
   conversationId: string,
   message: Omit<CreateMessageData, 'conversation_id'>,
 ): Promise<void> {
   try {
-    await messageRepository.create({ ...message, conversation_id: conversationId });
+    await messageRepository.createForUser(userId, { ...message, conversation_id: conversationId });
   } catch (err) {
     logger.error({ err, conversationId }, 'persistMessage failed');
   }
