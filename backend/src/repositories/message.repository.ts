@@ -32,14 +32,13 @@ export class MessageRepository {
       .from(TABLES.MESSAGES)
       .select('*')
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
     if (error) {
-      if (error.code === 'PGRST116') return null;
       throw new Error(`MessageRepository.findById failed: ${error.message}`);
     }
 
-    return data as Message;
+    return data as Message | null;
   }
 
   async findByConversationId(
@@ -74,6 +73,24 @@ export class MessageRepository {
     }
 
     return created as Message;
+  }
+
+  async createForUser(userId: string, data: CreateMessageData): Promise<Message> {
+    const { data: conversation, error: conversationError } = await supabaseAdmin
+      .from(TABLES.CONVERSATIONS)
+      .select('id')
+      .eq('id', data.conversation_id)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (conversationError) {
+      throw new Error(`MessageRepository.createForUser ownership check failed: ${conversationError.message}`);
+    }
+    if (!conversation) {
+      throw new Error('Conversation not found for authenticated user');
+    }
+
+    return this.create(data);
   }
 
   async delete(id: string): Promise<boolean> {
