@@ -3,7 +3,7 @@ export {
   chatRequestSchema,
   conversationParamsSchema,
   reattachStreamParamsSchema,
-  paginationSchema,
+  paginationQuerySchema,
   errorResponseSchema,
 } from './search.validator.js';
 export type {
@@ -11,6 +11,7 @@ export type {
   ChatRequest,
   ConversationParams,
   ReattachStreamParams,
+  PaginationQuery,
 } from './search.validator.js';
 
 export { validateBody, validateParams, validateQuery } from './middleware.js';
