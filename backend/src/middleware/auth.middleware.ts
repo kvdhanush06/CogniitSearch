@@ -13,32 +13,41 @@ declare global {
   }
 }
 
-/**
- * Extracts the session token from the configured cookie, verifies it
- * with Supabase, and attaches the user to `req.user`.
- *
- * On failure, calls `next()` with no user attached — downstream code
- * should check `req.user` to decide whether the route is public.
- */
-export async function loadSession(req: Request, _res: Response, next: NextFunction): Promise<void> {
+export async function loadSession(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const token = req.cookies?.[env.SESSION_COOKIE_NAME] as string | undefined;
-    if (!token) return next();
+    if (!token) {
+      next();
+      return;
+    }
+
     const user = await getUserFromToken(token);
+    if (!user) {
+      res.clearCookie(env.SESSION_COOKIE_NAME, {
+        httpOnly: true,
+        secure: env.COOKIE_SECURE,
+        sameSite: env.COOKIE_SAMESITE,
+        domain: env.COOKIE_DOMAIN || undefined,
+      });
+      next();
+      return;
+    }
+
     req.user = user;
     req.sessionToken = token;
     next();
   } catch (err) {
-    // Invalid/expired — clear the broken cookie so the client can move on.
     logger.debug({ err }, 'Session verification failed');
+    res.clearCookie(env.SESSION_COOKIE_NAME, {
+      httpOnly: true,
+      secure: env.COOKIE_SECURE,
+      sameSite: env.COOKIE_SAMESITE,
+      domain: env.COOKIE_DOMAIN || undefined,
+    });
     next();
   }
 }
 
-/**
- * Requires an authenticated user. Use after `loadSession` on protected routes.
- * Responds 401 with the standard envelope when `req.user` is missing.
- */
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   if (!req.user) {
     res.status(401).json({
