@@ -1,23 +1,14 @@
 import { type Request, type Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
+
 import { logger } from '../config/logger.js';
 import { searchService } from '../services/search.service.js';
 import type { SearchRequest } from './validators/index.js';
 
-/**
- * POST /search
- * Execute search pipeline: Search → Rank → Crawl → Context
- */
 export async function search(req: Request, res: Response): Promise<void> {
   try {
-    const {
-      query,
-      maxResults,
-      enableCrawl,
-      enableRanking,
-    } = req.body as SearchRequest;
-
-    const userId = req.headers['x-user-id'] as string ?? 'anonymous';
+    const { query, maxResults, enableCrawl, enableRanking } = req.body as SearchRequest;
+    const userId = req.user?.id ?? 'anonymous';
 
     logger.info({ query, userId }, 'Search request received');
 
@@ -37,15 +28,19 @@ export async function search(req: Request, res: Response): Promise<void> {
       },
     });
   } catch (error) {
-    logger.error({ err: error, query: req.body.query }, 'Search failed');
+    logger.error({ err: error instanceof Error ? error.message : String(error) }, 'Search failed');
 
-    const statusCode = error && typeof error === 'object' && 'status' in error ? (error as any).status : StatusCodes.INTERNAL_SERVER_ERROR;
-    const message = error instanceof Error ? error.message : 'Search failed';
+    const statusCode =
+      error && typeof error === 'object' && 'status' in error &&
+      typeof (error as { status?: unknown }).status === 'number'
+        ? (error as { status: number }).status
+        : StatusCodes.INTERNAL_SERVER_ERROR;
 
-    res.status(statusCode).json({
+    const safeStatus = statusCode >= 400 && statusCode < 500 ? statusCode : StatusCodes.INTERNAL_SERVER_ERROR;
+    res.status(safeStatus).json({
       success: false,
       error: {
-        message,
+        message: safeStatus === StatusCodes.INTERNAL_SERVER_ERROR ? 'Search failed' : 'Search request could not be processed',
         code: 'SEARCH_ERROR',
       },
     });
